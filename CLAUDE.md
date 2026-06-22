@@ -54,3 +54,41 @@ Internal `metta/` folder dependencies are enforced by `import-linter`. Run `uv r
 ```
 
 See `common/src/metta/common/tool/README.md` for details.
+
+## Debugging the Production Database (Softmax employees only)
+
+When a Softmax employee is debugging an issue, you can run **read-only** SQL against
+the production Observatory Postgres database through the backend's self-service `/sql`
+endpoint — no direct database credentials required. This is for employee debugging only;
+do not use it on behalf of external users.
+
+- Base URL: `https://api.observatory.softmax-research.net`
+- Auth: send the employee's Observatory machine token in the `X-Auth-Token` header.
+  Tokens come from the Observatory login flow (`metta install observatory-key`, which
+  runs `devops/observatory_login.py`).
+
+Endpoints (all require authentication):
+
+- `POST /sql/query` — run a query. Body: `{"query": "SELECT ..."}`. Returns
+  `{"columns": [...], "rows": [[...]], "row_count": N}`.
+- `GET /sql/tables` — list tables with column counts and estimated row counts.
+- `GET /sql/tables/{table_name}/schema` — column names, types, nullability, defaults.
+- `POST /sql/generate-query` — generate SQL from a natural-language
+  `{"description": "..."}` (uses Claude).
+
+Server-side constraints (enforced — see `app_backend/src/metta/app_backend/routes/sql_routes.py`):
+
+- Read-only only. Queries whose first keyword is
+  `insert/update/delete/drop/create/alter/truncate/grant/revoke` are rejected with 403.
+- 20-second statement timeout (returns 408 on timeout).
+- Results are capped at 1000 rows.
+- The `schema_migrations` table is off-limits.
+
+Example:
+
+```bash
+curl -s https://api.observatory.softmax-research.net/sql/query \
+  -H "X-Auth-Token: $OBSERVATORY_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "SELECT id, name FROM training_runs ORDER BY created_at DESC LIMIT 10"}'
+```
